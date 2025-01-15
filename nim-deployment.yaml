@@ -1,0 +1,210 @@
+apiVersion: v1
+data:
+  .dockerconfigjson: eyJhdXRoc*************EJOYWxaciJ9fX0=
+kind: Secret
+metadata:
+  creationTimestamp:
+  name: ngc-secret
+type: kubernetes.io/dockerconfigjson
+---
+apiVersion: v1
+data:
+  NGC_API_KEY: bnZhcGktT************************ZA==
+kind: Secret
+metadata:
+  creationTimestamp:
+  name: ngc-api-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama3-8b-instruct
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llama3-8b-instruct
+  template:
+    metadata:
+      labels:
+        app: llama3-8b-instruct
+    spec:
+      containers:
+        - name: llama3-8b-instruct
+          image: nvcr.io/nim/meta/llama3-8b-instruct:1.0.3
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NGC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ngc-api-secret
+                  key: NGC_API_KEY
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - mountPath: /opt/nim/.cache
+              name: nim-cache
+          securityContext:
+            runAsUser: 1000
+          livenessProbe:
+            httpGet:
+              path: /v1/health/live
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: nim-cache
+          hostPath:
+            path: /opt/namla/nim/models
+            type: DirectoryOrCreate
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - gcp-a100-id321
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpt-command-line-pod
+spec:
+  containers:
+    - name: gpt-command-line
+      image: python:3.9-slim
+      command:
+        - sh
+        - -c
+        - >
+          pip install gpt-command-line && pip install --upgrade openai gpt-cli
+          && sleep infinity
+      env:
+        - name: OPENAI_API_KEY
+          value: "null"
+        - name: OPENAI_BASE_URL
+          value: http://llama3-8b-instruct-svc:8000/v1
+      resources:
+        requests:
+          memory: 128Mi
+          cpu: 250m
+        limits:
+          memory: 256Mi
+          cpu: 500m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama3-8b-instruct-svc
+  namespace: default
+  labels:
+    app: llama3-8b-instruct
+spec:
+  selector:
+    app: llama3-8b-instruct
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-webui-deployment
+  labels:
+    app: open-webui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: open-webui
+  template:
+    metadata:
+      labels:
+        app: open-webui
+    spec:
+      containers:
+        - name: open-webui
+          image: ghcr.io/open-webui/open-webui:latest
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: open-webui-storage
+              mountPath: /app/backend/data
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 500m
+            limits:
+              memory: 1Gi
+              cpu: "1"
+      restartPolicy: Always
+      volumes:
+        - name: open-webui-storage
+          hostPath:
+            path: /opt/namla/open-webui
+            type: DirectoryOrCreate
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - gcp-a100-id321
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-webui-service
+spec:
+  selector:
+    app: open-webui
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-cloudflared-deployment
+  labels:
+    app: ollama-cloudflared
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama-cloudflared
+  template:
+    metadata:
+      labels:
+        app: ollama-cloudflared
+    spec:
+      containers:
+        - name: ollama-cloudflared
+          image: cloudflare/cloudflared:latest
+          args:
+            - tunnel
+            - --no-autoupdate
+            - run
+            - --token
+            - eyJ*********jMjJmNzJhNWNhMj************************************RWbExUZzRZe*******VeiJ9
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - gcp-a100-id321
